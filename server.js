@@ -11,10 +11,10 @@ app.use(bodyParser.json());
 // إعداد اتصال قاعدة البيانات باستخدام pool مع تعيين charset إلى utf8mb4
 const pool = mysql.createPool({
   connectionLimit: 10,
-  host: 'localhost',
-  user: 'root',
-  password: '', // ضع كلمة المرور هنا إذا كانت مُعينة
-  database: 'contactsdb',
+  host: 'contactsdb.czuycocms0ib.ap-southeast-1.rds.amazonaws.com',
+  user: 'admin',
+  password: '770825319hH$', // ضع كلمة المرور هنا إذا كانت مُعينة
+  database: process.env.DB_NAME || "contactsdb_mysql",
   charset: 'utf8mb4'
 });
 
