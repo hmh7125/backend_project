@@ -26,17 +26,10 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   connectTimeout: 10000, // مهلة الاتصال 10 ثواني
-  // يمكنك إضافة خيارات ssl إذا تطلب الأمر (مثلاً في AWS RDS)
-  // ssl: { rejectUnauthorized: false }
-  
-});
-// إضافة مستمع SIGTERM لمعالجة الإنهاء بلطف
-process.on('SIGTERM', () => {
-  console.log("استلام إشارة SIGTERM، جاري الإنهاء بلطف...");
-  process.exit(0);
+  // ssl: { rejectUnauthorized: false } // في حال احتجت لتفعيل SSL
 });
 
-// دالة لاختبار الاتصال بقاعدة البيانات عند بدء التشغيل
+// اختبار الاتصال بقاعدة البيانات عند بدء التشغيل
 async function testDBConnection() {
   try {
     const connection = await pool.getConnection();
@@ -49,6 +42,12 @@ async function testDBConnection() {
 }
 testDBConnection();
 
+// إضافة مستمع SIGTERM للتعامل مع الإنهاء بلطف
+process.on('SIGTERM', () => {
+  console.log("استلام إشارة SIGTERM، جاري الإنهاء بلطف...");
+  process.exit(0);
+});
+
 // نقطة نهاية أساسية لاختبار عمل الـ API
 app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
@@ -60,8 +59,8 @@ app.get("/api/contacts/search", async (req, res, next) => {
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  page = parseInt(page) || 1; // الصفحة الافتراضية
-  limit = parseInt(limit) || 100; // عدد السجلات في الصفحة الافتراضية
+  page = parseInt(page) || 1;
+  limit = parseInt(limit) || 100;
   const offset = (page - 1) * limit;
   console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
@@ -95,7 +94,7 @@ app.get("/api/numbers", async (req, res, next) => {
   }
 });
 
-// Endpoint لإضافة جهة اتصال جديدة (فردية)
+// Endpoint لإضافة جهة اتصال فردية
 app.post("/api/contacts", async (req, res, next) => {
   const { phone, names } = req.body;
   if (!phone || !names) {
@@ -111,8 +110,8 @@ app.post("/api/contacts", async (req, res, next) => {
   }
 });
 
-// **Endpoint جديد لرفع دفعات جهات الاتصال**
-app.post("/api/contacts/upload", async (req, res, next) => {
+// **Endpoint لرفع دفعات جهات الاتصال (سِنك)**
+app.post("/api/contacts/sync", async (req, res, next) => {
   const { contacts } = req.body;
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
     return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
