@@ -26,7 +26,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   connectTimeout: 10000, // مهلة الاتصال 10 ثواني
-  // يمكنك إضافة خيارات أخرى مثل ssl إذا تطلب الأمر (مثلاً في AWS RDS)
+  // يمكنك إضافة خيارات ssl إذا تطلب الأمر (مثلاً في AWS RDS)
   // ssl: { rejectUnauthorized: false }
 });
 
@@ -89,7 +89,7 @@ app.get("/api/numbers", async (req, res, next) => {
   }
 });
 
-// Endpoint لإضافة جهة اتصال جديدة (مثال)
+// Endpoint لإضافة جهة اتصال جديدة (فردية)
 app.post("/api/contacts", async (req, res, next) => {
   const { phone, names } = req.body;
   if (!phone || !names) {
@@ -101,6 +101,23 @@ app.post("/api/contacts", async (req, res, next) => {
     res.status(201).json({ message: "تمت إضافة جهة الاتصال بنجاح", id: result.insertId });
   } catch (error) {
     console.error("❌ خطأ أثناء إضافة جهة الاتصال:", error.message);
+    next(error);
+  }
+});
+
+// **Endpoint جديد لرفع دفعات جهات الاتصال**
+app.post("/api/contacts/upload", async (req, res, next) => {
+  const { contacts } = req.body;
+  if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+    return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
+  }
+  try {
+    const values = contacts.map(contact => [contact.phone, contact.names]);
+    const query = "INSERT INTO nambers_thabeet (phone, names) VALUES ?";
+    const [result] = await pool.query(query, [values]);
+    res.status(201).json({ message: "تم رفع دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
+  } catch (error) {
+    console.error("❌ خطأ أثناء رفع دفعة جهات الاتصال:", error.message);
     next(error);
   }
 });
