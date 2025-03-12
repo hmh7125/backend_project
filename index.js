@@ -26,7 +26,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   connectTimeout: 10000, // مهلة الاتصال 10 ثواني
-  // ssl: { rejectUnauthorized: false } // في حال احتجت لتفعيل SSL
+  // ssl: { rejectUnauthorized: false } // يمكن تفعيله إذا كان الخادم يتطلب SSL
 });
 
 // اختبار الاتصال بقاعدة البيانات عند بدء التشغيل
@@ -59,8 +59,8 @@ app.get("/api/contacts/search", async (req, res, next) => {
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  page = parseInt(page) || 1;
-  limit = parseInt(limit) || 100;
+  page = parseInt(page) || 1; // الصفحة الافتراضية
+  limit = parseInt(limit) || 100; // عدد السجلات في الصفحة الافتراضية
   const offset = (page - 1) * limit;
   console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
@@ -110,8 +110,9 @@ app.post("/api/contacts", async (req, res, next) => {
   }
 });
 
-// **Endpoint لرفع دفعات جهات الاتصال (سِنك)**
+// Endpoint لرفع دفعات جهات الاتصال (Sync)
 app.post("/api/contacts/sync", async (req, res, next) => {
+  console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
   const { contacts } = req.body;
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
     return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
@@ -120,6 +121,7 @@ app.post("/api/contacts/sync", async (req, res, next) => {
     const values = contacts.map(contact => [contact.phone, contact.names]);
     const query = "INSERT INTO nambers_thabeet (phone, names) VALUES ?";
     const [result] = await pool.query(query, [values]);
+    console.log("✅ رفع الدفعة بنجاح:", result);
     res.status(201).json({ message: "تم رفع دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
   } catch (error) {
     console.error("❌ خطأ أثناء رفع دفعة جهات الاتصال:", error.message);
