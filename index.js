@@ -28,6 +28,12 @@ const pool = mysql.createPool({
   connectTimeout: 10000, // مهلة الاتصال 10 ثواني
   // يمكنك إضافة خيارات ssl إذا تطلب الأمر (مثلاً في AWS RDS)
   // ssl: { rejectUnauthorized: false }
+  
+});
+// إضافة مستمع SIGTERM لمعالجة الإنهاء بلطف
+process.on('SIGTERM', () => {
+  console.log("استلام إشارة SIGTERM، جاري الإنهاء بلطف...");
+  process.exit(0);
 });
 
 // دالة لاختبار الاتصال بقاعدة البيانات عند بدء التشغيل
