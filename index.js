@@ -14,9 +14,9 @@ app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json());
 
-// إنشاء pool للاتصالات بقاعدة البيانات
+// إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان الـ RDS
+  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (RDS)
   user: process.env.DB_USER,           // اسم المستخدم
   password: process.env.DB_PASSWORD,   // كلمة المرور
   database: process.env.DB_NAME,       // اسم قاعدة البيانات
@@ -78,6 +78,28 @@ app.get("/api/contacts/search", async (req, res, next) => {
   }
 });
 
+// **Endpoint جديد: اقتراحات جهات الاتصال**
+app.get("/api/contacts/suggestions", async (req, res, next) => {
+  let { q, limit } = req.query;
+  if (!q) {
+    return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
+  }
+  limit = parseInt(limit) || 5; // القيمة الافتراضية 5 اقتراحات
+  try {
+    const searchTerm = `%${q}%`;
+    const query = `
+      SELECT * FROM nambers_thabeet 
+      WHERE phone LIKE ? OR names LIKE ?
+      LIMIT ?
+    `;
+    const [results] = await pool.query(query, [searchTerm, searchTerm, limit]);
+    res.json({ results });
+  } catch (error) {
+    console.error("❌ خطأ أثناء استرجاع الاقتراحات:", error.message);
+    next(error);
+  }
+});
+
 // Endpoint لاسترجاع قائمة الأرقام مع الترقيم
 app.get("/api/numbers", async (req, res, next) => {
   let { page, limit } = req.query;
@@ -119,7 +141,8 @@ app.post("/api/contacts/sync", async (req, res, next) => {
   }
   try {
     const values = contacts.map(contact => [contact.phone, contact.names]);
-    const query = "INSERT INTO nambers_thabeet (phone, names) VALUES ?";
+    // استخدام INSERT IGNORE لتجنب التكرار
+    const query = "INSERT IGNORE INTO nambers_thabeet (phone, names) VALUES ?";
     const [result] = await pool.query(query, [values]);
     console.log("✅ رفع دفعة جهات الاتصال بنجاح:", result);
     res.status(201).json({ message: "تم رفع دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
