@@ -16,7 +16,7 @@ app.use(express.json());
 
 // إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان الـ RDS
+  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (RDS)
   user: process.env.DB_USER,           // اسم المستخدم
   password: process.env.DB_PASSWORD,   // كلمة المرور
   database: process.env.DB_NAME,       // اسم قاعدة البيانات
@@ -42,13 +42,13 @@ async function testDBConnection() {
 }
 testDBConnection();
 
-// إضافة مستمع SIGTERM للتعامل مع الإنهاء بلطف
+// التعامل مع إشارة الإنهاء بلطف
 process.on('SIGTERM', () => {
   console.log("استلام إشارة SIGTERM، جاري الإنهاء...");
   process.exit(0);
 });
 
-// نقطة نهاية أساسية لاختبار عمل الـ API
+// نقطة نهاية لاختبار عمل الـ API
 app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
