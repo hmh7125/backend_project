@@ -14,9 +14,9 @@ app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json());
 
-// إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
+// إنشاء pool للاتصالات بقاعدة البيانات
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (RDS)
+  host: process.env.DB_HOST,           // عنوان الـ RDS
   user: process.env.DB_USER,           // اسم المستخدم
   password: process.env.DB_PASSWORD,   // كلمة المرور
   database: process.env.DB_NAME,       // اسم قاعدة البيانات
@@ -48,7 +48,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
-// نقطة نهاية لاختبار عمل الـ API
+// نقطة نهاية أساسية لاختبار عمل الـ API
 app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
@@ -64,12 +64,12 @@ app.get("/api/contacts/search", async (req, res, next) => {
   const offset = (page - 1) * limit;
   console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
+    const searchTerm = `%${q}%`;
     const query = `
       SELECT * FROM nambers_thabeet 
       WHERE phone LIKE ? OR names LIKE ?
       LIMIT ? OFFSET ?
     `;
-    const searchTerm = `%${q}%`;
     const [results] = await pool.query(query, [searchTerm, searchTerm, limit, offset]);
     res.json({ page, limit, results });
   } catch (error) {
@@ -121,7 +121,7 @@ app.post("/api/contacts/sync", async (req, res, next) => {
     const values = contacts.map(contact => [contact.phone, contact.names]);
     const query = "INSERT INTO nambers_thabeet (phone, names) VALUES ?";
     const [result] = await pool.query(query, [values]);
-    console.log("✅ رفع الدفعة بنجاح:", result);
+    console.log("✅ رفع دفعة جهات الاتصال بنجاح:", result);
     res.status(201).json({ message: "تم رفع دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
   } catch (error) {
     console.error("❌ خطأ أثناء رفع دفعة جهات الاتصال:", error.message);
