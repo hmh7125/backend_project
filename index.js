@@ -1,3 +1,4 @@
+// index.js
 require('dotenv').config(); // تحميل متغيرات البيئة من ملف .env
 
 const express = require('express');
@@ -15,23 +16,24 @@ app.use(express.json());
 
 // إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,          
-  user: process.env.DB_USER,          
-  password: process.env.DB_PASSWORD,  
-  database: process.env.DB_NAME,      
+  host: process.env.DB_HOST,           // عنوان الـ RDS
+  user: process.env.DB_USER,           // اسم المستخدم
+  password: process.env.DB_PASSWORD,   // كلمة المرور
+  database: process.env.DB_NAME,       // اسم قاعدة البيانات
   port: process.env.DB_PORT || 3306,
   charset: 'utf8mb4',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  connectTimeout: 10000, // مهلة الاتصال 10 ثواني
+  connectTimeout: 10000 // مهلة الاتصال 10 ثواني
+  // ssl: { rejectUnauthorized: false } // فعّل إذا كان الخادم يتطلب SSL
 });
 
 // اختبار الاتصال بقاعدة البيانات عند بدء التشغيل
 async function testDBConnection() {
   try {
     const connection = await pool.getConnection();
-    console.log("✅ تم الاتصال بقاعدة البيانات بنجاح!");
+    console.log("✅ تم الاتصال بقاعدة البيانات!");
     connection.release();
   } catch (error) {
     console.error("❌ فشل الاتصال بقاعدة البيانات:", error.message);
@@ -51,17 +53,16 @@ app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
 
-// البحث في جدول الأرقام
+// Endpoint للبحث في جدول nambers_thabeet
 app.get("/api/contacts/search", async (req, res, next) => {
   let { q, page, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-
   page = parseInt(page) || 1;
   limit = parseInt(limit) || 100;
   const offset = (page - 1) * limit;
-
+  console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
     const query = `
       SELECT * FROM nambers_thabeet 
@@ -77,13 +78,12 @@ app.get("/api/contacts/search", async (req, res, next) => {
   }
 });
 
-// استرجاع قائمة الأرقام
+// Endpoint لاسترجاع قائمة الأرقام مع الترقيم
 app.get("/api/numbers", async (req, res, next) => {
   let { page, limit } = req.query;
   page = parseInt(page) || 1;
   limit = parseInt(limit) || 100;
   const offset = (page - 1) * limit;
-
   try {
     const query = "SELECT phone FROM nambers_thabeet LIMIT ? OFFSET ?";
     const [results] = await pool.query(query, [limit, offset]);
@@ -94,13 +94,12 @@ app.get("/api/numbers", async (req, res, next) => {
   }
 });
 
-// إضافة جهة اتصال فردية
+// Endpoint لإضافة جهة اتصال فردية
 app.post("/api/contacts", async (req, res, next) => {
   const { phone, names } = req.body;
   if (!phone || !names) {
     return res.status(400).json({ error: "يجب توفير رقم الهاتف والاسم." });
   }
-
   try {
     const query = "INSERT INTO nambers_thabeet (phone, names) VALUES (?, ?)";
     const [result] = await pool.query(query, [phone, names]);
@@ -111,40 +110,32 @@ app.post("/api/contacts", async (req, res, next) => {
   }
 });
 
-// رفع دفعات جهات الاتصال
+// Endpoint لرفع دفعات جهات الاتصال (Sync)
 app.post("/api/contacts/sync", async (req, res, next) => {
   console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
-
   const { contacts } = req.body;
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
     return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
   }
-
   try {
-    const values = contacts.map(({ phone, names }) => [phone, names]);
+    const values = contacts.map(contact => [contact.phone, contact.names]);
     const query = "INSERT INTO nambers_thabeet (phone, names) VALUES ?";
-    
-    // تنفيذ الإدخال فقط إذا كانت هناك بيانات
-    if (values.length > 0) {
-      const [result] = await pool.query(query, [values]);
-      console.log("✅ رفع الدفعة بنجاح:", result);
-      return res.status(201).json({ message: "تم رفع دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
-    } else {
-      return res.status(400).json({ error: "القائمة المرسلة فارغة!" });
-    }
+    const [result] = await pool.query(query, [values]);
+    console.log("✅ رفع الدفعة بنجاح:", result);
+    res.status(201).json({ message: "تم رفع دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
   } catch (error) {
     console.error("❌ خطأ أثناء رفع دفعة جهات الاتصال:", error.message);
     next(error);
   }
 });
 
-// معالجة الأخطاء العامة
+// Middleware لمعالجة الأخطاء العامة
 app.use((err, req, res, next) => {
   console.error("❌ خطأ داخلي:", err.message);
   res.status(500).json({ error: "خطأ داخلي في الخادم", details: err.message });
 });
 
-// بدء تشغيل الخادم
+// بدء تشغيل الخادم والاستماع لجميع الأجهزة
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ الخادم يعمل على http://0.0.0.0:${PORT}`);
 });
