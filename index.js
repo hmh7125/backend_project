@@ -9,24 +9,24 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// إعداد الـ Middleware
+// إعداد Middleware للتعامل مع CORS والتسجيل وتحليل JSON
 app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json());
 
 // إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (RDS)
-  user: process.env.DB_USER,           // اسم المستخدم
-  password: process.env.DB_PASSWORD,   // كلمة المرور
-  database: process.env.DB_NAME,       // اسم قاعدة البيانات
+  host: process.env.DB_HOST,         // عنوان قاعدة البيانات (RDS)
+  user: process.env.DB_USER,         // اسم المستخدم
+  password: process.env.DB_PASSWORD, // كلمة المرور
+  database: process.env.DB_NAME,     // اسم قاعدة البيانات
   port: process.env.DB_PORT || 3306,
   charset: 'utf8mb4',
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  connectTimeout: 10000 // مهلة الاتصال 10 ثواني
-  // ssl: { rejectUnauthorized: false } // فعّل إذا كان الخادم يتطلب SSL
+  connectTimeout: 10000             // مهلة الاتصال 10 ثواني
+  // ssl: { rejectUnauthorized: false } // فعّل هذا الخيار إذا كان الخادم يتطلب SSL
 });
 
 // اختبار الاتصال بقاعدة البيانات عند بدء التشغيل
@@ -42,9 +42,9 @@ async function testDBConnection() {
 }
 testDBConnection();
 
-// التعامل مع إشارة الإنهاء بلطف
+// التعامل مع إشارة الإنهاء بلطف (SIGTERM)
 process.on('SIGTERM', () => {
-  console.log("استلام إشارة SIGTERM، جاري الإنهاء...");
+  console.log("استلام إشارة SIGTERM، جاري الإنهاء بلطف...");
   process.exit(0);
 });
 
@@ -53,7 +53,7 @@ app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
 
-// Endpoint للبحث في جدول nambers_thabeet
+// Endpoint للبحث في جدول nambers_thabeet باستخدام الترقيم
 app.get("/api/contacts/search", async (req, res, next) => {
   let { q, page, limit } = req.query;
   if (!q) {
@@ -133,6 +133,7 @@ app.post("/api/contacts", async (req, res, next) => {
 });
 
 // Endpoint لرفع دفعات جهات الاتصال (Sync)
+// نستخدم INSERT IGNORE لتجنب التكرار (يجب أن يكون لديك قيد فريد على عمود phone في الجدول)
 app.post("/api/contacts/sync", async (req, res, next) => {
   console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
   const { contacts } = req.body;
@@ -141,7 +142,6 @@ app.post("/api/contacts/sync", async (req, res, next) => {
   }
   try {
     const values = contacts.map(contact => [contact.phone, contact.names]);
-    // استخدام INSERT IGNORE لتجنب التكرار
     const query = "INSERT IGNORE INTO nambers_thabeet (phone, names) VALUES ?";
     const [result] = await pool.query(query, [values]);
     console.log("✅ رفع دفعة جهات الاتصال بنجاح:", result);
