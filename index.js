@@ -14,19 +14,9 @@ app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json());
 
-// إعداد مصادقة بسيطة (مثال)
-// إذا كنت تريد حماية بعض نقاط النهاية الحساسة، يمكنك تحديد API_KEY في ملف .env
-function simpleAuth(req, res, next) {
-  const token = req.headers['x-api-key'];
-  if (process.env.API_KEY && token !== process.env.API_KEY) {
-    return res.status(401).json({ error: 'غير مصرح بالوصول' });
-  }
-  next();
-}
-
-// إنشاء pool للاتصالات بقاعدة البيانات مع بعض الإعدادات
+// إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (RDS)
+  host: process.env.DB_HOST,           // عنوان الـ RDS أو الخادم
   user: process.env.DB_USER,           // اسم المستخدم
   password: process.env.DB_PASSWORD,   // كلمة المرور
   database: process.env.DB_NAME,       // اسم قاعدة البيانات
@@ -36,41 +26,24 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   connectTimeout: 10000 // مهلة الاتصال 10 ثواني
-  // ssl: { rejectUnauthorized: false } // فعّل هذا الخيار إذا كان الخادم يتطلب SSL
+  // يمكنك تفعيل ssl إذا كان ذلك مطلوباً (مثلاً في AWS RDS)
+  // ssl: { rejectUnauthorized: false }
 });
 
-// دالة مساعدة لتغليف الاستعلامات مع مؤقت (timeout)
-async function queryWithTimeout(query, params, timeout = 10000) {
-  return Promise.race([
-    pool.query(query, params),
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('انتهت مهلة الاستعلام')), timeout)
-    )
-  ]);
-}
-
-// دالة اختبار الاتصال بقاعدة البيانات مع آلية إعادة المحاولة
-async function testDBConnection(retries = 3, delay = 3000) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const connection = await pool.getConnection();
-      console.log("✅ تم الاتصال بقاعدة البيانات!");
-      connection.release();
-      return;
-    } catch (error) {
-      console.error(`❌ فشل الاتصال بقاعدة البيانات (محاولة ${i + 1}):`, error.message);
-      if (i < retries - 1) {
-        console.log(`إعادة المحاولة بعد ${delay / 1000} ثانية...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        process.exit(1);
-      }
-    }
+// اختبار الاتصال بقاعدة البيانات عند بدء التشغيل
+async function testDBConnection() {
+  try {
+    const connection = await pool.getConnection();
+    console.log("✅ تم الاتصال بقاعدة البيانات!");
+    connection.release();
+  } catch (error) {
+    console.error("❌ فشل الاتصال بقاعدة البيانات:", error.message);
+    process.exit(1);
   }
 }
 testDBConnection();
 
-// إضافة مستمع SIGTERM للتعامل مع الإنهاء بلطف
+// التعامل مع إشارة SIGTERM لإنهاء التطبيق بلطف
 process.on('SIGTERM', () => {
   console.log("استلام إشارة SIGTERM، جاري الإنهاء بلطف...");
   process.exit(0);
@@ -81,31 +54,24 @@ app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
 
-// --- نقاط النهاية الخاصة بجهات الاتصال ---
-
 // Endpoint للبحث في جدول nambers_thabeet
-app.get("/api/contacts/search", simpleAuth, async (req, res, next) => {
+app.get("/api/contacts/search", async (req, res, next) => {
   let { q, page, limit, type } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  // تحقق من نوع البحث إذا كان 'phone' أو 'name'
-  let searchField = "phone";
-  if (type && type.toLowerCase() === "name") {
-    searchField = "names";
-  }
   page = parseInt(page) || 1;
   limit = parseInt(limit) || 100;
   const offset = (page - 1) * limit;
-  console.log("طلب بحث وارد:", { q, type, page, limit });
+  console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit, "النوع:", type);
   try {
     const searchTerm = `%${q}%`;
     const query = `
       SELECT * FROM nambers_thabeet 
-      WHERE ${searchField} LIKE ?
+      WHERE phone LIKE ? OR names LIKE ?
       LIMIT ? OFFSET ?
     `;
-    const [results] = await queryWithTimeout(query, [searchTerm, limit, offset]);
+    const [results] = await pool.query(query, [searchTerm, searchTerm, limit, offset]);
     res.json({ page, limit, results });
   } catch (error) {
     console.error("❌ خطأ أثناء البحث:", error.message);
@@ -113,13 +79,14 @@ app.get("/api/contacts/search", simpleAuth, async (req, res, next) => {
   }
 });
 
-// Endpoint لاقتراح جهات الاتصال (يُرجع قائمة الاقتراحات مباشرة)
-app.get("/api/contacts/suggestions", simpleAuth, async (req, res, next) => {
+// Endpoint لاقتراح جهات الاتصال (suggestions)
+app.get("/api/contacts/suggestions", async (req, res, next) => {
   let { q, limit } = req.query;
   if (!q) {
-    return res.status(400).send("يجب تقديم معلمة البحث 'q'.");
+    return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
   limit = parseInt(limit) || 5;
+  console.log("طلب اقتراحات وارد مع المعلمة:", q, "الحد:", limit);
   try {
     const searchTerm = `%${q}%`;
     const query = `
@@ -127,9 +94,8 @@ app.get("/api/contacts/suggestions", simpleAuth, async (req, res, next) => {
       WHERE phone LIKE ? OR names LIKE ?
       LIMIT ?
     `;
-    const [results] = await queryWithTimeout(query, [searchTerm, searchTerm, limit]);
-    // إرجاع القائمة مباشرة
-    res.json(results);
+    const [results] = await pool.query(query, [searchTerm, searchTerm, limit]);
+    res.json({ results });
   } catch (error) {
     console.error("❌ خطأ أثناء استرجاع الاقتراحات:", error.message);
     next(error);
@@ -137,14 +103,14 @@ app.get("/api/contacts/suggestions", simpleAuth, async (req, res, next) => {
 });
 
 // Endpoint لاسترجاع قائمة الأرقام مع الترقيم
-app.get("/api/numbers", simpleAuth, async (req, res, next) => {
+app.get("/api/numbers", async (req, res, next) => {
   let { page, limit } = req.query;
   page = parseInt(page) || 1;
   limit = parseInt(limit) || 100;
   const offset = (page - 1) * limit;
   try {
     const query = "SELECT phone FROM nambers_thabeet LIMIT ? OFFSET ?";
-    const [results] = await queryWithTimeout(query, [limit, offset]);
+    const [results] = await pool.query(query, [limit, offset]);
     res.json({ page, limit, numbers: results });
   } catch (error) {
     console.error("❌ خطأ أثناء جلب الأرقام:", error.message);
@@ -153,14 +119,14 @@ app.get("/api/numbers", simpleAuth, async (req, res, next) => {
 });
 
 // Endpoint لإضافة جهة اتصال فردية
-app.post("/api/contacts", simpleAuth, async (req, res, next) => {
+app.post("/api/contacts", async (req, res, next) => {
   const { phone, names } = req.body;
   if (!phone || !names) {
     return res.status(400).json({ error: "يجب توفير رقم الهاتف والاسم." });
   }
   try {
     const query = "INSERT INTO nambers_thabeet (phone, names) VALUES (?, ?)";
-    const [result] = await queryWithTimeout(query, [phone, names]);
+    const [result] = await pool.query(query, [phone, names]);
     res.status(201).json({ message: "تمت إضافة جهة الاتصال بنجاح", id: result.insertId });
   } catch (error) {
     console.error("❌ خطأ أثناء إضافة جهة الاتصال:", error.message);
@@ -168,8 +134,9 @@ app.post("/api/contacts", simpleAuth, async (req, res, next) => {
   }
 });
 
-// Endpoint لرفع دفعات جهات الاتصال (Sync) مع تحديث السجلات الموجودة لتجنب التكرار
-app.post("/api/contacts/sync", simpleAuth, async (req, res, next) => {
+// Endpoint لرفع دفعات جهات الاتصال (Sync)
+// باستخدام ON DUPLICATE KEY UPDATE لتحديث السجلات الحالية وتجنب التكرار
+app.post("/api/contacts/sync", async (req, res, next) => {
   console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
   const { contacts } = req.body;
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
@@ -177,12 +144,13 @@ app.post("/api/contacts/sync", simpleAuth, async (req, res, next) => {
   }
   try {
     const values = contacts.map(contact => [contact.phone, contact.names]);
+    // تأكد من وجود قيد فريد على عمود phone في جدول nambers_thabeet
     const query = `
       INSERT INTO nambers_thabeet (phone, names)
       VALUES ?
       ON DUPLICATE KEY UPDATE names = VALUES(names)
     `;
-    const [result] = await queryWithTimeout(query, [values]);
+    const [result] = await pool.query(query, [values]);
     console.log("✅ رفع وتحديث دفعة جهات الاتصال بنجاح:", result);
     res.status(201).json({ message: "تم رفع وتحديث دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
   } catch (error) {
