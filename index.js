@@ -16,7 +16,7 @@ app.use(express.json());
 
 // إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان الـ RDS أو الخادم
+  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (مثل RDS)
   user: process.env.DB_USER,           // اسم المستخدم
   password: process.env.DB_PASSWORD,   // كلمة المرور
   database: process.env.DB_NAME,       // اسم قاعدة البيانات
@@ -26,8 +26,7 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   connectTimeout: 10000 // مهلة الاتصال 10 ثواني
-  // يمكنك تفعيل ssl إذا كان ذلك مطلوباً (مثلاً في AWS RDS)
-  // ssl: { rejectUnauthorized: false }
+  // ssl: { rejectUnauthorized: false } // فعّل هذا الخيار إذا كان الخادم يتطلب SSL
 });
 
 // اختبار الاتصال بقاعدة البيانات عند بدء التشغيل
@@ -43,7 +42,7 @@ async function testDBConnection() {
 }
 testDBConnection();
 
-// التعامل مع إشارة SIGTERM لإنهاء التطبيق بلطف
+// الاستماع لإشارة SIGTERM لإنهاء التطبيق بلطف
 process.on('SIGTERM', () => {
   console.log("استلام إشارة SIGTERM، جاري الإنهاء بلطف...");
   process.exit(0);
@@ -54,16 +53,16 @@ app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
 
-// Endpoint للبحث في جدول nambers_thabeet
+// Endpoint للبحث في جدول nambers_thabeet (بحث بالرقم أو الاسم)
 app.get("/api/contacts/search", async (req, res, next) => {
-  let { q, page, limit, type } = req.query;
+  let { q, page, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
   page = parseInt(page) || 1;
   limit = parseInt(limit) || 100;
   const offset = (page - 1) * limit;
-  console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit, "النوع:", type);
+  console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
     const searchTerm = `%${q}%`;
     const query = `
@@ -79,30 +78,29 @@ app.get("/api/contacts/search", async (req, res, next) => {
   }
 });
 
-// Endpoint لاقتراح جهات الاتصال (suggestions)
+// Endpoint لاقتراحات البحث (مثلاً لعرض قائمة مختصرة من النتائج)
 app.get("/api/contacts/suggestions", async (req, res, next) => {
   let { q, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  limit = parseInt(limit) || 5;
-  console.log("طلب اقتراحات وارد مع المعلمة:", q, "الحد:", limit);
+  limit = parseInt(limit) || 5; // القيمة الافتراضية: 5 اقتراحات
   try {
     const searchTerm = `%${q}%`;
     const query = `
-      SELECT * FROM nambers_thabeet 
+      SELECT phone, names FROM nambers_thabeet 
       WHERE phone LIKE ? OR names LIKE ?
       LIMIT ?
     `;
     const [results] = await pool.query(query, [searchTerm, searchTerm, limit]);
-    res.json({ results });
+    res.json({ suggestions: results });
   } catch (error) {
     console.error("❌ خطأ أثناء استرجاع الاقتراحات:", error.message);
     next(error);
   }
 });
 
-// Endpoint لاسترجاع قائمة الأرقام مع الترقيم
+// Endpoint لاسترجاع قائمة الأرقام فقط مع الترقيم
 app.get("/api/numbers", async (req, res, next) => {
   let { page, limit } = req.query;
   page = parseInt(page) || 1;
@@ -135,7 +133,7 @@ app.post("/api/contacts", async (req, res, next) => {
 });
 
 // Endpoint لرفع دفعات جهات الاتصال (Sync)
-// باستخدام ON DUPLICATE KEY UPDATE لتحديث السجلات الحالية وتجنب التكرار
+// يتم إرسال قائمة جهات الاتصال؛ إذا كان الرقم موجودًا يتم تحديث الاسم باستخدام ON DUPLICATE KEY UPDATE
 app.post("/api/contacts/sync", async (req, res, next) => {
   console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
   const { contacts } = req.body;
@@ -143,8 +141,8 @@ app.post("/api/contacts/sync", async (req, res, next) => {
     return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
   }
   try {
+    // تأكد من أن عمود "phone" يحتوي على قيد فريد (Unique constraint) في قاعدة البيانات
     const values = contacts.map(contact => [contact.phone, contact.names]);
-    // تأكد من وجود قيد فريد على عمود phone في جدول nambers_thabeet
     const query = `
       INSERT INTO nambers_thabeet (phone, names)
       VALUES ?
