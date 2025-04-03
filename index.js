@@ -16,7 +16,7 @@ app.use(express.json());
 
 // إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (مثل RDS)
+  host: process.env.DB_HOST,           // عنوان الـ RDS
   user: process.env.DB_USER,           // اسم المستخدم
   password: process.env.DB_PASSWORD,   // كلمة المرور
   database: process.env.DB_NAME,       // اسم قاعدة البيانات
@@ -25,7 +25,7 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  connectTimeout: 10000 // مهلة الاتصال 10 ثواني
+  connectTimeout: 10000, // مهلة الاتصال 10 ثواني
   // ssl: { rejectUnauthorized: false } // فعّل هذا الخيار إذا كان الخادم يتطلب SSL
 });
 
@@ -42,7 +42,7 @@ async function testDBConnection() {
 }
 testDBConnection();
 
-// الاستماع لإشارة SIGTERM لإنهاء التطبيق بلطف
+// التعامل مع إشارة SIGTERM لإنهاء التطبيق بلطف
 process.on('SIGTERM', () => {
   console.log("استلام إشارة SIGTERM، جاري الإنهاء بلطف...");
   process.exit(0);
@@ -53,14 +53,15 @@ app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
 
-// Endpoint للبحث في جدول nambers_thabeet (بحث بالرقم أو الاسم)
+// Endpoint للبحث في جدول nambers_thabeet باستخدام معلمة البحث "q"
+// يبحث في عمود الهاتف والاسم
 app.get("/api/contacts/search", async (req, res, next) => {
   let { q, page, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  page = parseInt(page) || 1;
-  limit = parseInt(limit) || 100;
+  page = parseInt(page) || 1; // الصفحة الافتراضية
+  limit = parseInt(limit) || 100; // عدد السجلات في الصفحة الافتراضية
   const offset = (page - 1) * limit;
   console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
@@ -78,29 +79,39 @@ app.get("/api/contacts/search", async (req, res, next) => {
   }
 });
 
-// Endpoint لاقتراحات البحث (مثلاً لعرض قائمة مختصرة من النتائج)
+// Endpoint لاقتراح جهات الاتصال (Suggestions)
+// يُمكن البحث عن طريق الهاتف أو الاسم حسب معلمة "type" (phone أو name)
+// إذا لم تُحدد "type"، سيتم البحث في كلا العمودين.
 app.get("/api/contacts/suggestions", async (req, res, next) => {
-  let { q, limit } = req.query;
+  let { q, type, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  limit = parseInt(limit) || 5; // القيمة الافتراضية: 5 اقتراحات
+  limit = parseInt(limit) || 5; // افتراضي 5 اقتراحات
   try {
     const searchTerm = `%${q}%`;
-    const query = `
-      SELECT phone, names FROM nambers_thabeet 
-      WHERE phone LIKE ? OR names LIKE ?
-      LIMIT ?
-    `;
-    const [results] = await pool.query(query, [searchTerm, searchTerm, limit]);
-    res.json({ suggestions: results });
+    let query;
+    let params;
+    if (type && type.toLowerCase() === 'phone') {
+      query = "SELECT phone, names FROM nambers_thabeet WHERE phone LIKE ? LIMIT ?";
+      params = [searchTerm, limit];
+    } else if (type && type.toLowerCase() === 'name') {
+      query = "SELECT phone, names FROM nambers_thabeet WHERE names LIKE ? LIMIT ?";
+      params = [searchTerm, limit];
+    } else {
+      // إذا لم يتم تحديد نوع، ابحث في كلا الحقلين
+      query = "SELECT phone, names FROM nambers_thabeet WHERE phone LIKE ? OR names LIKE ? LIMIT ?";
+      params = [searchTerm, searchTerm, limit];
+    }
+    const [results] = await pool.query(query, params);
+    res.json({ results });
   } catch (error) {
-    console.error("❌ خطأ أثناء استرجاع الاقتراحات:", error.message);
+    console.error("❌ خطأ أثناء جلب الاقتراحات:", error.message);
     next(error);
   }
 });
 
-// Endpoint لاسترجاع قائمة الأرقام فقط مع الترقيم
+// Endpoint لاسترجاع قائمة الأرقام مع الترقيم
 app.get("/api/numbers", async (req, res, next) => {
   let { page, limit } = req.query;
   page = parseInt(page) || 1;
@@ -133,7 +144,7 @@ app.post("/api/contacts", async (req, res, next) => {
 });
 
 // Endpoint لرفع دفعات جهات الاتصال (Sync)
-// يتم إرسال قائمة جهات الاتصال؛ إذا كان الرقم موجودًا يتم تحديث الاسم باستخدام ON DUPLICATE KEY UPDATE
+// يتم استخدام INSERT ... ON DUPLICATE KEY UPDATE لتجنب التكرار وتحديث السجلات الموجودة
 app.post("/api/contacts/sync", async (req, res, next) => {
   console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
   const { contacts } = req.body;
@@ -141,7 +152,7 @@ app.post("/api/contacts/sync", async (req, res, next) => {
     return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
   }
   try {
-    // تأكد من أن عمود "phone" يحتوي على قيد فريد (Unique constraint) في قاعدة البيانات
+    // تأكد من وجود قيد فريد (UNIQUE) على عمود phone في الجدول لكي يعمل ON DUPLICATE KEY UPDATE
     const values = contacts.map(contact => [contact.phone, contact.names]);
     const query = `
       INSERT INTO nambers_thabeet (phone, names)
