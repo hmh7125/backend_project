@@ -7,15 +7,15 @@ const morgan = require('morgan');
 const cors = require('cors');
 
 const app = express();
-// تغيير البورت الافتراضي إلى 8080 كما طلبت
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8080; // تشغيل الخادم على المنفذ 8080
 
 // إعداد الـ Middleware
 app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json());
 
-// إنشاء pool للاتصالات بقاعدة البيانات مع زيادة connectionLimit لحل مشكلة "كثرة الاتصالات"
+// إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
+// connectionLimit تم تعيينه إلى 10000 لجعل عدد الاتصالات "غير محدود" تقريباً
 const pool = mysql.createPool({
   host: process.env.DB_HOST,           // عنوان الـ RDS أو السيرفر المحلي
   user: process.env.DB_USER,           // اسم المستخدم
@@ -24,7 +24,7 @@ const pool = mysql.createPool({
   port: process.env.DB_PORT || 3306,
   charset: 'utf8mb4',
   waitForConnections: true,
-  connectionLimit: 50, // زيادة عدد الاتصالات المسموح بها
+  connectionLimit: 10000, // عدد الاتصالات كبير جدًا
   queueLimit: 0,
   connectTimeout: 10000 // مهلة الاتصال 10 ثواني
   // ssl: { rejectUnauthorized: false } // فعّل هذا الخيار إذا كان الخادم يتطلب SSL
