@@ -54,13 +54,12 @@ app.get("/", (req, res) => {
 });
 
 // Endpoint للبحث في جدول nambers_thabeet باستخدام معلمة "q"
-// يتم البحث في عمود الهاتف والاسم مع التأكد من تحويل قيمة البحث إلى نص
+// يتم البحث في عمود الهاتف والاسم، حيث يتم إزالة المسافات من رقم الهاتف لضمان المطابقة
 app.get("/api/contacts/search", async (req, res, next) => {
   let { q, page, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  // تحويل معلمة البحث إلى نص لضمان المطابقة سواء كانت أرقام أو حروف
   q = q.toString();
   page = parseInt(page) || 1;
   limit = parseInt(limit) || 100;
@@ -68,9 +67,10 @@ app.get("/api/contacts/search", async (req, res, next) => {
   console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
     const searchTerm = `%${q}%`;
+    // باستخدام REPLACE نقوم بإزالة المسافات من عمود الهاتف
     const query = `
       SELECT * FROM nambers_thabeet 
-      WHERE phone LIKE ? OR names LIKE ?
+      WHERE (REPLACE(phone, ' ', '') LIKE ? OR names LIKE ?)
       LIMIT ? OFFSET ?
     `;
     const [results] = await pool.query(query, [searchTerm, searchTerm, limit, offset]);
@@ -82,8 +82,7 @@ app.get("/api/contacts/search", async (req, res, next) => {
 });
 
 // Endpoint لاقتراح جهات الاتصال (Suggestions)
-// يدعم البحث عن طريق الهاتف أو الاسم حسب معلمة "type"
-// إذا لم تُحدد "type"، يتم البحث في كلا العمودين.
+// يدعم البحث عن طريق الهاتف أو الاسم حسب معلمة "type"؛ إذا لم تُحدد يتم البحث في كلا الحقلين.
 app.get("/api/contacts/suggestions", async (req, res, next) => {
   let { q, type, limit } = req.query;
   if (!q) {
@@ -96,13 +95,13 @@ app.get("/api/contacts/suggestions", async (req, res, next) => {
     let query;
     let params;
     if (type && type.toLowerCase() === 'phone') {
-      query = "SELECT phone, names, photo_url FROM nambers_thabeet WHERE phone LIKE ? LIMIT ?";
+      query = "SELECT phone, names, photo_url FROM nambers_thabeet WHERE REPLACE(phone, ' ', '') LIKE ? LIMIT ?";
       params = [searchTerm, limit];
     } else if (type && type.toLowerCase() === 'name') {
       query = "SELECT phone, names, photo_url FROM nambers_thabeet WHERE names LIKE ? LIMIT ?";
       params = [searchTerm, limit];
     } else {
-      query = "SELECT phone, names, photo_url FROM nambers_thabeet WHERE phone LIKE ? OR names LIKE ? LIMIT ?";
+      query = "SELECT phone, names, photo_url FROM nambers_thabeet WHERE REPLACE(phone, ' ', '') LIKE ? OR names LIKE ? LIMIT ?";
       params = [searchTerm, searchTerm, limit];
     }
     const [results] = await pool.query(query, params);
@@ -146,7 +145,7 @@ app.post("/api/contacts", async (req, res, next) => {
 });
 
 // Endpoint لرفع دفعات جهات الاتصال (Sync)
-// يستخدم INSERT ... ON DUPLICATE KEY UPDATE لتحديث السجلات الحالية وتفادي التكرار
+// يستخدم INSERT ... ON DUPLICATE KEY UPDATE لتحديث السجلات الموجودة وتفادي التكرار
 app.post("/api/contacts/sync", async (req, res, next) => {
   console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
   const { contacts } = req.body;
@@ -154,7 +153,6 @@ app.post("/api/contacts/sync", async (req, res, next) => {
     return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
   }
   try {
-    // تأكد من وجود قيد UNIQUE على عمود phone في جدول nambers_thabeet
     const values = contacts.map(contact => [
       contact.phone,
       contact.names,
@@ -177,7 +175,7 @@ app.post("/api/contacts/sync", async (req, res, next) => {
 });
 
 // Endpoint لسحب جهات الاتصال التي تحتوي على صور
-// يعرض الرقم، الاسم، ورابط الصورة (إذا كانت موجودة)
+// يعرض رقم الهاتف والاسم ورابط الصورة (إذا كانت موجودة)
 app.get("/api/contacts/images", async (req, res, next) => {
   try {
     const query = `
