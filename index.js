@@ -25,7 +25,7 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  connectTimeout: 10000, // مهلة الاتصال 10 ثواني
+  connectTimeout: 30000, // مهلة الاتصال 30 ثواني
   // ssl: { rejectUnauthorized: false } // فعّل هذا الخيار إذا كان الخادم يتطلب SSL
 });
 
