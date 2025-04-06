@@ -16,7 +16,7 @@ app.use(express.json());
 
 // إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (RDS)
+  host: process.env.DB_HOST,           // عنوان قاعدة البيانات (مثال: RDS)
   user: process.env.DB_USER,           // اسم المستخدم
   password: process.env.DB_PASSWORD,   // كلمة المرور
   database: process.env.DB_NAME,       // اسم قاعدة البيانات
@@ -53,14 +53,14 @@ app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
 
-// Endpoint للبحث في جدول nambers_thabeet
+// Endpoint للبحث في جدول nambers_thabeet باستخدام الترقيم
 app.get("/api/contacts/search", async (req, res, next) => {
   let { q, page, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  page = parseInt(page) || 1;
-  limit = parseInt(limit) || 100;
+  page = parseInt(page) || 1; // الصفحة الافتراضية
+  limit = parseInt(limit) || 100; // عدد السجلات الافتراضي
   const offset = (page - 1) * limit;
   console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
@@ -74,6 +74,28 @@ app.get("/api/contacts/search", async (req, res, next) => {
     res.json({ page, limit, results });
   } catch (error) {
     console.error("❌ خطأ أثناء البحث:", error.message);
+    next(error);
+  }
+});
+
+// Endpoint لتقديم اقتراحات جهات الاتصال (Suggestions)
+app.get("/api/contacts/suggestions", async (req, res, next) => {
+  let { q, limit } = req.query;
+  if (!q) {
+    return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
+  }
+  limit = parseInt(limit) || 5; // القيمة الافتراضية 5 اقتراحات
+  try {
+    const searchTerm = `%${q}%`;
+    const query = `
+      SELECT * FROM nambers_thabeet 
+      WHERE phone LIKE ? OR names LIKE ?
+      LIMIT ?
+    `;
+    const [results] = await pool.query(query, [searchTerm, searchTerm, limit]);
+    res.json({ results });
+  } catch (error) {
+    console.error("❌ خطأ أثناء استرجاع الاقتراحات:", error.message);
     next(error);
   }
 });
@@ -94,15 +116,15 @@ app.get("/api/numbers", async (req, res, next) => {
   }
 });
 
-// Endpoint لإضافة جهة اتصال فردية
+// Endpoint لإضافة جهة اتصال فردية (مع دعم الصورة إن وُجدت)
 app.post("/api/contacts", async (req, res, next) => {
-  const { phone, names } = req.body;
+  const { phone, names, photo_url } = req.body;
   if (!phone || !names) {
     return res.status(400).json({ error: "يجب توفير رقم الهاتف والاسم." });
   }
   try {
-    const query = "INSERT INTO nambers_thabeet (phone, names) VALUES (?, ?)";
-    const [result] = await pool.query(query, [phone, names]);
+    const query = "INSERT INTO nambers_thabeet (phone, names, photo_url) VALUES (?, ?, ?)";
+    const [result] = await pool.query(query, [phone, names, photo_url || null]);
     res.status(201).json({ message: "تمت إضافة جهة الاتصال بنجاح", id: result.insertId });
   } catch (error) {
     console.error("❌ خطأ أثناء إضافة جهة الاتصال:", error.message);
@@ -111,7 +133,7 @@ app.post("/api/contacts", async (req, res, next) => {
 });
 
 // Endpoint لرفع دفعات جهات الاتصال (Sync)
-// هنا نستخدم INSERT ... ON DUPLICATE KEY UPDATE لتحديث السجلات الموجودة وتجنب التكرار
+// نستخدم INSERT IGNORE لتجنب التكرار، ويمكن تعديلها لتحديث الصورة إذا كانت البيانات موجودة
 app.post("/api/contacts/sync", async (req, res, next) => {
   console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
   const { contacts } = req.body;
@@ -119,16 +141,18 @@ app.post("/api/contacts/sync", async (req, res, next) => {
     return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
   }
   try {
-    // تأكد من وجود قيد فريد على عمود phone في جدول nambers_thabeet لتعمل هذه الجملة
-    const values = contacts.map(contact => [contact.phone, contact.names]);
+    const values = contacts.map(contact => [
+      contact.phone,
+      contact.names,
+      contact.photo_url || null
+    ]);
     const query = `
-      INSERT INTO nambers_thabeet (phone, names)
+      INSERT IGNORE INTO nambers_thabeet (phone, names, photo_url)
       VALUES ?
-      ON DUPLICATE KEY UPDATE names = VALUES(names)
     `;
     const [result] = await pool.query(query, [values]);
-    console.log("✅ رفع وتحديث دفعة جهات الاتصال بنجاح:", result);
-    res.status(201).json({ message: "تم رفع وتحديث دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
+    console.log("✅ رفع دفعة جهات الاتصال بنجاح:", result);
+    res.status(201).json({ message: "تم رفع دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
   } catch (error) {
     console.error("❌ خطأ أثناء رفع دفعة جهات الاتصال:", error.message);
     next(error);
