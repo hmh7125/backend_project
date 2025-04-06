@@ -16,7 +16,7 @@ app.use(express.json());
 
 // إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,           // عنوان الـ RDS
+  host: process.env.DB_HOST,           // عنوان الـ RDS أو السيرفر المحلي
   user: process.env.DB_USER,           // اسم المستخدم
   password: process.env.DB_PASSWORD,   // كلمة المرور
   database: process.env.DB_NAME,       // اسم قاعدة البيانات
@@ -53,15 +53,17 @@ app.get("/", (req, res) => {
   res.send("🚀 API يعمل بنجاح!");
 });
 
-// Endpoint للبحث في جدول nambers_thabeet باستخدام معلمة البحث "q"
-// يبحث في عمود الهاتف والاسم
+// Endpoint للبحث في جدول nambers_thabeet باستخدام معلمة "q"
+// يتم البحث في عمود الهاتف والاسم مع التأكد من تحويل قيمة البحث إلى نص
 app.get("/api/contacts/search", async (req, res, next) => {
   let { q, page, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  page = parseInt(page) || 1; // الصفحة الافتراضية
-  limit = parseInt(limit) || 100; // عدد السجلات في الصفحة الافتراضية
+  // تحويل معلمة البحث إلى نص لضمان المطابقة سواء كانت أرقام أو حروف
+  q = q.toString();
+  page = parseInt(page) || 1;
+  limit = parseInt(limit) || 100;
   const offset = (page - 1) * limit;
   console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
@@ -80,27 +82,27 @@ app.get("/api/contacts/search", async (req, res, next) => {
 });
 
 // Endpoint لاقتراح جهات الاتصال (Suggestions)
-// يُمكن البحث عن طريق الهاتف أو الاسم حسب معلمة "type" (phone أو name)
-// إذا لم تُحدد "type"، سيتم البحث في كلا العمودين.
+// يدعم البحث عن طريق الهاتف أو الاسم حسب معلمة "type"
+// إذا لم تُحدد "type"، يتم البحث في كلا العمودين.
 app.get("/api/contacts/suggestions", async (req, res, next) => {
   let { q, type, limit } = req.query;
   if (!q) {
     return res.status(400).json({ error: 'يجب تقديم معلمة البحث "q".' });
   }
-  limit = parseInt(limit) || 5; // افتراضي 5 اقتراحات
+  q = q.toString();
+  limit = parseInt(limit) || 5;
   try {
     const searchTerm = `%${q}%`;
     let query;
     let params;
     if (type && type.toLowerCase() === 'phone') {
-      query = "SELECT phone, names FROM nambers_thabeet WHERE phone LIKE ? LIMIT ?";
+      query = "SELECT phone, names, photo_url FROM nambers_thabeet WHERE phone LIKE ? LIMIT ?";
       params = [searchTerm, limit];
     } else if (type && type.toLowerCase() === 'name') {
-      query = "SELECT phone, names FROM nambers_thabeet WHERE names LIKE ? LIMIT ?";
+      query = "SELECT phone, names, photo_url FROM nambers_thabeet WHERE names LIKE ? LIMIT ?";
       params = [searchTerm, limit];
     } else {
-      // إذا لم يتم تحديد نوع، ابحث في كلا الحقلين
-      query = "SELECT phone, names FROM nambers_thabeet WHERE phone LIKE ? OR names LIKE ? LIMIT ?";
+      query = "SELECT phone, names, photo_url FROM nambers_thabeet WHERE phone LIKE ? OR names LIKE ? LIMIT ?";
       params = [searchTerm, searchTerm, limit];
     }
     const [results] = await pool.query(query, params);
@@ -127,15 +129,15 @@ app.get("/api/numbers", async (req, res, next) => {
   }
 });
 
-// Endpoint لإضافة جهة اتصال فردية
+// Endpoint لإضافة جهة اتصال فردية مع دعم رابط الصورة (photo_url)
 app.post("/api/contacts", async (req, res, next) => {
-  const { phone, names } = req.body;
+  const { phone, names, photo_url } = req.body;
   if (!phone || !names) {
     return res.status(400).json({ error: "يجب توفير رقم الهاتف والاسم." });
   }
   try {
-    const query = "INSERT INTO nambers_thabeet (phone, names) VALUES (?, ?)";
-    const [result] = await pool.query(query, [phone, names]);
+    const query = "INSERT INTO nambers_thabeet (phone, names, photo_url) VALUES (?, ?, ?)";
+    const [result] = await pool.query(query, [phone, names, photo_url || null]);
     res.status(201).json({ message: "تمت إضافة جهة الاتصال بنجاح", id: result.insertId });
   } catch (error) {
     console.error("❌ خطأ أثناء إضافة جهة الاتصال:", error.message);
@@ -144,7 +146,7 @@ app.post("/api/contacts", async (req, res, next) => {
 });
 
 // Endpoint لرفع دفعات جهات الاتصال (Sync)
-// يتم استخدام INSERT ... ON DUPLICATE KEY UPDATE لتجنب التكرار وتحديث السجلات الموجودة
+// يستخدم INSERT ... ON DUPLICATE KEY UPDATE لتحديث السجلات الحالية وتفادي التكرار
 app.post("/api/contacts/sync", async (req, res, next) => {
   console.log("🔔 تم استلام طلب رفع جهات الاتصال:", req.body);
   const { contacts } = req.body;
@@ -152,18 +154,41 @@ app.post("/api/contacts/sync", async (req, res, next) => {
     return res.status(400).json({ error: "يجب توفير قائمة جهات اتصال غير فارغة." });
   }
   try {
-    // تأكد من وجود قيد فريد (UNIQUE) على عمود phone في الجدول لكي يعمل ON DUPLICATE KEY UPDATE
-    const values = contacts.map(contact => [contact.phone, contact.names]);
+    // تأكد من وجود قيد UNIQUE على عمود phone في جدول nambers_thabeet
+    const values = contacts.map(contact => [
+      contact.phone,
+      contact.names,
+      contact.photo_url || null
+    ]);
     const query = `
-      INSERT INTO nambers_thabeet (phone, names)
+      INSERT INTO nambers_thabeet (phone, names, photo_url)
       VALUES ?
-      ON DUPLICATE KEY UPDATE names = VALUES(names)
+      ON DUPLICATE KEY UPDATE 
+        names = VALUES(names),
+        photo_url = VALUES(photo_url)
     `;
     const [result] = await pool.query(query, [values]);
     console.log("✅ رفع وتحديث دفعة جهات الاتصال بنجاح:", result);
     res.status(201).json({ message: "تم رفع وتحديث دفعة جهات الاتصال بنجاح", affectedRows: result.affectedRows });
   } catch (error) {
     console.error("❌ خطأ أثناء رفع دفعة جهات الاتصال:", error.message);
+    next(error);
+  }
+});
+
+// Endpoint لسحب جهات الاتصال التي تحتوي على صور
+// يعرض الرقم، الاسم، ورابط الصورة (إذا كانت موجودة)
+app.get("/api/contacts/images", async (req, res, next) => {
+  try {
+    const query = `
+      SELECT phone, names, photo_url 
+      FROM nambers_thabeet 
+      WHERE photo_url IS NOT NULL AND photo_url <> ''
+    `;
+    const [results] = await pool.query(query);
+    res.json({ results });
+  } catch (error) {
+    console.error("❌ خطأ أثناء جلب صور جهات الاتصال:", error.message);
     next(error);
   }
 });
