@@ -7,14 +7,15 @@ const morgan = require('morgan');
 const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// تغيير البورت الافتراضي إلى 8080 كما طلبت
+const PORT = process.env.PORT || 8080;
 
 // إعداد الـ Middleware
 app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json());
 
-// إنشاء pool للاتصالات بقاعدة البيانات مع إعدادات محسنة
+// إنشاء pool للاتصالات بقاعدة البيانات مع زيادة connectionLimit لحل مشكلة "كثرة الاتصالات"
 const pool = mysql.createPool({
   host: process.env.DB_HOST,           // عنوان الـ RDS أو السيرفر المحلي
   user: process.env.DB_USER,           // اسم المستخدم
@@ -23,9 +24,9 @@ const pool = mysql.createPool({
   port: process.env.DB_PORT || 3306,
   charset: 'utf8mb4',
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 50, // زيادة عدد الاتصالات المسموح بها
   queueLimit: 0,
-  connectTimeout: 30000, // مهلة الاتصال 30 ثواني
+  connectTimeout: 10000 // مهلة الاتصال 10 ثواني
   // ssl: { rejectUnauthorized: false } // فعّل هذا الخيار إذا كان الخادم يتطلب SSL
 });
 
@@ -54,7 +55,7 @@ app.get("/", (req, res) => {
 });
 
 // Endpoint للبحث في جدول nambers_thabeet باستخدام معلمة "q"
-// يتم البحث في عمود الهاتف والاسم، حيث يتم إزالة المسافات من رقم الهاتف لضمان المطابقة
+// يتم البحث في عمود الهاتف والاسم، ويتم إزالة المسافات من رقم الهاتف للمقارنة
 app.get("/api/contacts/search", async (req, res, next) => {
   let { q, page, limit } = req.query;
   if (!q) {
@@ -67,7 +68,6 @@ app.get("/api/contacts/search", async (req, res, next) => {
   console.log("طلب بحث وارد مع المعلمة:", q, "الصفحة:", page, "الحد:", limit);
   try {
     const searchTerm = `%${q}%`;
-    // باستخدام REPLACE نقوم بإزالة المسافات من عمود الهاتف
     const query = `
       SELECT * FROM nambers_thabeet 
       WHERE (REPLACE(phone, ' ', '') LIKE ? OR names LIKE ?)
@@ -82,7 +82,8 @@ app.get("/api/contacts/search", async (req, res, next) => {
 });
 
 // Endpoint لاقتراح جهات الاتصال (Suggestions)
-// يدعم البحث عن طريق الهاتف أو الاسم حسب معلمة "type"؛ إذا لم تُحدد يتم البحث في كلا الحقلين.
+// يدعم البحث عن طريق الهاتف أو الاسم حسب معلمة "type"
+// إذا لم تُحدد "type" يتم البحث في كلا الحقلين.
 app.get("/api/contacts/suggestions", async (req, res, next) => {
   let { q, type, limit } = req.query;
   if (!q) {
