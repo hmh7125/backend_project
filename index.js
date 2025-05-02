@@ -167,5 +167,5 @@ app.use((err, req, res, next) => {
 
 // بدء تشغيل الخادم والاستماع لجميع الأجهزة
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ الخادم يعمل على http://0.0.0.0:${PORT}`);
+  console.log(`✅ الخادم يعمل على http://0.0.1.0:${PORT}`);
 });
